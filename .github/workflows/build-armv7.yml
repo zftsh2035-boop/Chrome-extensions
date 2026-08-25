@@ -54,7 +54,7 @@ jobs:
           [[ -n "$ANDROID_KEYSTORE_PASSWORD" ]]
 
       - name: Free runner disk space
-        run: ./scripts/free-github-runner-disk.sh
+        run: bash ./scripts/free-github-runner-disk.sh
 
       - name: Select Chromium revision
         id: revision
@@ -76,10 +76,10 @@ jobs:
       - name: Fetch Chromium and dependencies
         env:
           CHROMIUM_REF: ${{ steps.revision.outputs.ref }}
-        run: ./scripts/bootstrap.sh
+        run: bash ./scripts/bootstrap.sh
 
       - name: Compile chrome_public_apk
-        run: ./scripts/build.sh
+        run: bash ./scripts/build.sh
 
       - name: Decode private release key
         env:
@@ -91,8 +91,8 @@ jobs:
 
       - name: Sign and verify APK
         run: |
-          ./scripts/sign-apk.sh "$RUNNER_TEMP/release.p12"
-          ./scripts/verify-apk.sh dist/Chromium-ARMv7-Extensions-signed.apk
+          bash ./scripts/sign-apk.sh "$RUNNER_TEMP/release.p12"
+          bash ./scripts/verify-apk.sh dist/Chromium-ARMv7-Extensions-signed.apk
 
       - name: Read build metadata
         id: metadata
