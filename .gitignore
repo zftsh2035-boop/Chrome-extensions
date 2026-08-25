@@ -1,0 +1,22 @@
+# Chromium/depot_tools checkouts and build outputs.
+/chromium/
+/depot_tools/
+/out/
+/dist/
+*.apk
+*.aab
+
+# Signing material must never be committed.
+*.jks
+*.keystore
+*.p12
+*.pem
+*.pass
+*.password
+.env
+
+# Local caches and logs.
+/.cache/
+/.config/
+/.vpython-root/
+*.log
