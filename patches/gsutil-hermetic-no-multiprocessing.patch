@@ -1,0 +1,15 @@
+--- a/gslib/utils/parallelism_framework_util.py
++++ b/gslib/utils/parallelism_framework_util.py
+@@
+ import logging
+ import multiprocessing
++import os
+ import threading
+ import traceback
+@@
+ def CheckMultiprocessingAvailableAndInit(logger=None):
++  # Hermetic sandboxes may deny multiprocessing.Manager local sockets while
++  # still permitting normal threads and network access.
++  if os.environ.get('GSUTIL_DISABLE_MULTIPROCESSING') == '1':
++    return MultiprocessingIsAvailableResult(is_available=False,
++                                            stack_trace=None)
