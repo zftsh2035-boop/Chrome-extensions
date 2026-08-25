@@ -1,0 +1,40 @@
+target_os = "android"
+target_cpu = "arm"
+
+# Upstream experimental Desktop Android configuration. This automatically sets
+# enable_desktop_android_extensions=true and enable_extensions_core=true.
+is_desktop_android = true
+
+# Release-style public Chromium build. Google Chrome branding and private
+# Google sources are intentionally not used.
+is_debug = false
+is_official_build = true
+is_chrome_branded = false
+is_component_build = false
+
+# Keep the package identity stable so updates signed with the same key install
+# over the existing app without clearing its profile.
+chrome_public_manifest_package = "org.chromium.chrome"
+android_channel = "default"
+
+# Public Chromium codec configuration. Widevine is not part of Chromium.
+proprietary_codecs = false
+ffmpeg_branding = "Chromium"
+
+# Avoid build-server-only optimizations and profiles. These materially reduce
+# local/Actions memory, disk, and link-time requirements.
+chrome_pgo_phase = 0
+clang_use_default_sample_profile = false
+use_thin_lto = false
+is_cfi = false
+use_order_profiling = false
+use_reclient = false
+use_siso = false
+android_static_analysis = "off"
+
+# No debug symbols are shipped in the APK. This does not disable runtime logs.
+symbol_level = 0
+blink_symbol_level = 0
+v8_symbol_level = 0
+
+treat_warnings_as_errors = false
