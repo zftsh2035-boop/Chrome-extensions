@@ -1,0 +1,177 @@
+name: Build ARMv7 Chromium
+
+on:
+  workflow_dispatch:
+    inputs:
+      chromium_ref:
+        description: Chromium commit, tag, or branch; empty uses pinned revision
+        required: false
+        type: string
+      use_tip_of_tree:
+        description: Build current Chromium main
+        required: true
+        default: false
+        type: boolean
+      publish_release:
+        description: Publish signed APK in GitHub Releases
+        required: true
+        default: true
+        type: boolean
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: chromium-armv7-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      CHROMIUM_WORK_ROOT: ${{ github.workspace }}/.work
+      NINJA_JOBS: "4"
+      GCLIENT_JOBS: "4"
+      NINJA_SUMMARIZE_BUILD: "1"
+      NINJA_STATUS: "[%f/%t %o/sec %es] "
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: chromium_armv7_extensions
+      EXPECTED_CERT_SHA256: 90266730e98c8a40c53694f06c33ab8201968afea039e3ce7347fd7f42ead4f2
+
+    steps:
+      - name: Check out build repository
+        uses: actions/checkout@v4
+
+      - name: Validate signing secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          set -Eeuo pipefail
+          [[ -n "$KEYSTORE_B64" ]]
+          [[ -n "$ANDROID_KEYSTORE_PASSWORD" ]]
+
+      - name: Free runner disk space
+        run: ./scripts/free-github-runner-disk.sh
+
+      - name: Select Chromium revision
+        id: revision
+        env:
+          INPUT_REF: ${{ inputs.chromium_ref }}
+          INPUT_TIP: ${{ inputs.use_tip_of_tree }}
+        run: |
+          set -Eeuo pipefail
+          source config/chromium.env
+          if [[ "${{ github.event_name }}" == "schedule" || "$INPUT_TIP" == "true" ]]; then
+            ref=main
+          elif [[ -n "$INPUT_REF" ]]; then
+            ref="$INPUT_REF"
+          else
+            ref="$CHROMIUM_COMMIT"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch Chromium and dependencies
+        env:
+          CHROMIUM_REF: ${{ steps.revision.outputs.ref }}
+        run: ./scripts/bootstrap.sh
+
+      - name: Compile chrome_public_apk
+        run: ./scripts/build.sh
+
+      - name: Decode private release key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          set -Eeuo pipefail
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/release.p12"
+          chmod 600 "$RUNNER_TEMP/release.p12"
+
+      - name: Sign and verify APK
+        run: |
+          ./scripts/sign-apk.sh "$RUNNER_TEMP/release.p12"
+          ./scripts/verify-apk.sh dist/Chromium-ARMv7-Extensions-signed.apk
+
+      - name: Read build metadata
+        id: metadata
+        run: |
+          set -Eeuo pipefail
+          version="$(jq -r .chromium_version dist/build-metadata.json)"
+          commit="$(jq -r .chromium_commit dist/build-metadata.json)"
+          position="$(jq -r .chromium_commit_position dist/build-metadata.json)"
+          short_commit="${commit:0:12}"
+          tag="chromium-${version}-r${position}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "short_commit=$short_commit" >> "$GITHUB_OUTPUT"
+          echo "position=$position" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Upload durable Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Chromium-${{ steps.metadata.outputs.version }}-armeabi-v7a
+          path: |
+            dist/Chromium-ARMv7-Extensions-signed.apk
+            dist/build-metadata.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish GitHub release
+        if: github.event_name == 'schedule' || inputs.publish_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.metadata.outputs.tag }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+          COMMIT: ${{ steps.metadata.outputs.commit }}
+          POSITION: ${{ steps.metadata.outputs.position }}
+        run: |
+          set -Eeuo pipefail
+          notes="$RUNNER_TEMP/release-notes.md"
+          {
+            echo "Chromium **$VERSION** for Android armeabi-v7a."
+            echo
+            echo "- Upstream commit: \`$COMMIT\`"
+            echo "- Commit position: \`$POSITION\`"
+            echo "- Desktop Android extensions: enabled"
+            echo "- Package: \`org.chromium.chrome\`"
+            echo "- Certificate SHA-256: \`$EXPECTED_CERT_SHA256\`"
+            echo
+            echo "Experimental build: keep a backup of important browser data."
+          } > "$notes"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              dist/Chromium-ARMv7-Extensions-signed.apk \
+              dist/build-metadata.json --clobber
+          else
+            gh release create "$TAG" \
+              dist/Chromium-ARMv7-Extensions-signed.apk \
+              dist/build-metadata.json \
+              --title "Chromium $VERSION ARMv7 + extensions" \
+              --notes-file "$notes"
+          fi
+
+      - name: Advance pinned revision after scheduled success
+        if: github.event_name == 'schedule'
+        env:
+          VERSION: ${{ steps.metadata.outputs.version }}
+          COMMIT: ${{ steps.metadata.outputs.commit }}
+          POSITION: ${{ steps.metadata.outputs.position }}
+        run: |
+          set -Eeuo pipefail
+          {
+            echo "# Last revision successfully built, signed, and verified."
+            echo "CHROMIUM_VERSION=$VERSION"
+            echo "CHROMIUM_COMMIT=$COMMIT"
+            echo "CHROMIUM_COMMIT_POSITION=$POSITION"
+          } > config/chromium.env
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add config/chromium.env
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: pin Chromium $VERSION"
+            git push
+          fi
