@@ -37,23 +37,62 @@ jobs:
       GCLIENT_JOBS: "4"
       NINJA_SUMMARIZE_BUILD: "1"
       NINJA_STATUS: "[%f/%t %o/sec %es] "
-      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: chromium_armv7_extensions
       EXPECTED_CERT_SHA256: 90266730e98c8a40c53694f06c33ab8201968afea039e3ce7347fd7f42ead4f2
 
     steps:
-      - name: Check out build repository
-        uses: actions/checkout@v4
-
       - name: Validate signing secrets
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           set -Eeuo pipefail
           [[ -n "$KEYSTORE_B64" ]]
           [[ -n "$ANDROID_KEYSTORE_PASSWORD" ]]
 
-      - name: Free runner disk space
+      - name: Remove unused preinstalled toolchains
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf -- \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /opt/hostedtoolcache \
+            /usr/local/.ghcup \
+            /usr/local/share/powershell \
+            /usr/share/swift \
+            /usr/lib/jvm \
+            /usr/local/graalvm \
+            /usr/local/lib/node_modules \
+            /usr/local/share/vcpkg \
+            /usr/local/aws-cli \
+            /usr/local/aws-sam-cli \
+            /usr/local/julia* \
+            /opt/az \
+            /opt/microsoft \
+            /opt/pipx \
+            /opt/google/chrome
+          sudo apt-get clean
+          sudo rm -rf -- /var/lib/apt/lists/* /var/cache/apt/*
+          if command -v docker >/dev/null 2>&1; then
+            docker system prune --all --force --volumes || true
+          fi
+          df -h / /mnt
+
+      # Pin the reviewed v10 commit. It joins the free space on / and /mnt
+      # into one disposable build volume mounted at GITHUB_WORKSPACE.
+      - name: Create large workspace volume
+        uses: easimon/maximize-build-space@fc881a613ad2a34aca9c9624518214ebc21dfc0c
+        with:
+          root-reserve-mb: "4096"
+          temp-reserve-mb: "100"
+          swap-size-mb: "2048"
+          overprovision-lvm: "false"
+
+      - name: Check out build repository
+        uses: actions/checkout@v4
+
+      - name: Report runner disk space
         run: bash ./scripts/free-github-runner-disk.sh
 
       - name: Select Chromium revision
@@ -90,6 +129,8 @@ jobs:
           chmod 600 "$RUNNER_TEMP/release.p12"
 
       - name: Sign and verify APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           bash ./scripts/sign-apk.sh "$RUNNER_TEMP/release.p12"
           bash ./scripts/verify-apk.sh dist/Chromium-ARMv7-Extensions-signed.apk
