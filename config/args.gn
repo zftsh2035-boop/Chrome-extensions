@@ -32,6 +32,11 @@ use_reclient = false
 use_siso = false
 android_static_analysis = "off"
 
+# GitHub-hosted jobs are limited to six hours. Keep completed C/C++
+# compilations in ccache so a later workflow job can continue the same build
+# instead of recompiling every source file from scratch.
+cc_wrapper = "ccache"
+
 # No debug symbols are shipped in the APK. This does not disable runtime logs.
 symbol_level = 0
 blink_symbol_level = 0
