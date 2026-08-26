@@ -32,7 +32,6 @@ solutions = [
   },
 ]
 target_os = ["android"]
-target_os_only = True
 GCLIENT
 
 (
@@ -61,9 +60,9 @@ df -h / "$REPO_ROOT"
   gclient runhooks
 )
 
-# target_os_only keeps the checkout compact, but chrome_public_apk still builds
-# a few x64 host tools (for example Perfetto's trace processor). Install their
-# hermetic Linux sysroot explicitly before discarding Git metadata and caches.
+# Android builds also compile Linux host tools (for example Perfetto's trace
+# processor). Keep the host OS dependencies in the gclient checkout and install
+# both hermetic Linux sysroots before discarding Git metadata and caches.
 python3 "$SRC_DIR/build/linux/sysroot_scripts/install-sysroot.py" --arch=amd64
 python3 "$SRC_DIR/build/linux/sysroot_scripts/install-sysroot.py" --arch=i386
 
