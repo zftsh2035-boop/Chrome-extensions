@@ -11,8 +11,11 @@
   Chromium 154 generated API 29 manifests in the first local attempt.
 
 The first temporary local build reached late V8/Blink compilation but its
-runtime was destroyed before the APK was packaged. This repository replaces
-that fragile setup with a reproducible Actions build and durable logs/artifacts.
+runtime was destroyed before the APK was packaged. Actions run 9 then compiled
+`33001/62584` targets without a source error before GitHub cancelled the job at
+its hard six-hour limit. The workflow now stops each compile slice early,
+saves an 8 GiB ccache checkpoint, and queues a continuation pinned to the same
+Chromium commit. Only the final slice can sign or publish an APK.
 
 ## Known limitations
 
@@ -20,7 +23,8 @@ that fragile setup with a reproducible Actions build and durable logs/artifacts.
   Chromium and may crash or regress between revisions.
 - Google Chrome branding, Google-internal sources, Widevine, and Chrome Sync
   are not available in a public Chromium checkout.
-- A GitHub-hosted standard runner may be close to its six-hour and disk limits.
-  The workflow frees unused preinstalled SDKs and disables expensive LTO/PGO.
-  If it still exceeds the limit, use a GitHub larger runner or a self-hosted
-  Linux x86_64 runner without changing the repository or signing identity.
+- A clean build exceeds the six-hour limit of a standard GitHub-hosted job.
+  Compiler checkpoints allow it to continue in later free jobs, but a cold
+  build can therefore need multiple workflow runs. A sufficiently powerful
+  self-hosted Linux x86_64 runner can complete it in one longer job without
+  changing the repository or signing identity.
