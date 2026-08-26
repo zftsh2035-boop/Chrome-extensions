@@ -27,4 +27,4 @@ if command -v docker >/dev/null 2>&1; then
   docker image prune --all --force || true
 fi
 
-df -h /
+df -h / "${GITHUB_WORKSPACE:-$PWD}" /mnt
