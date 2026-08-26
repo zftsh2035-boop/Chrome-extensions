@@ -42,18 +42,19 @@ GCLIENT
 )
 
 RESOLVED_COMMIT="$(git -C "$SRC_DIR" rev-parse HEAD)"
-df -h / "$REPO_ROOT"
+RESOLVED_POSITION="$(chromium_commit_position_from_source)"
+RESOLVED_TIMESTAMP="$(git -C "$SRC_DIR" log -1 --format=%ct)"
+cat > "$RESOLVED_REVISION_FILE" <<ENV
+RESOLVED_CHROMIUM_COMMIT=$RESOLVED_COMMIT
+RESOLVED_CHROMIUM_COMMIT_POSITION=$RESOLVED_POSITION
+RESOLVED_CHROMIUM_COMMIT_TIMESTAMP=$RESOLVED_TIMESTAMP
+ENV
 
-# The workflow installs host packages before pooling root free space into the
-# build volume. Validate the exact checked-out revision without attempting to
-# write into the deliberately small root reserve.
-"$SRC_DIR/build/install-build-deps.sh" \
-  --quick-check \
-  --no-syms \
-  --lib32 \
-  --no-arm \
-  --no-chromeos-fonts \
-  --no-backwards-compatible
+# Chromium's lastchange utility supports these variables for source archives
+# without Git metadata. Export them before hooks and keep them for the build.
+export BASE_COMMIT_HASH="$RESOLVED_COMMIT"
+export BASE_COMMIT_SUBMISSION_MS="$((RESOLVED_TIMESTAMP * 1000))"
+df -h / "$REPO_ROOT"
 
 (
   cd "$SRC_DIR"
@@ -62,6 +63,14 @@ df -h / "$REPO_ROOT"
 
 df -h / "$REPO_ROOT"
 
+# A shallow gclient checkout still stores a second copy of source content in
+# Git object databases. Hooks are finished and Chromium supports source-archive
+# builds through BASE_COMMIT_*, so discard only VCS metadata before compiling.
+find "$CHECKOUT_ROOT" -name .git -prune -print0 \
+  | xargs -0 --no-run-if-empty rm -rf --
+rm -rf -- "$WORK_ROOT/.cache"
+df -h / "$REPO_ROOT"
+
 echo "Chromium $(chromium_version_from_source)"
-echo "Commit $(git -C "$SRC_DIR" rev-parse HEAD)"
-echo "Commit position $(chromium_commit_position_from_source)"
+echo "Commit $RESOLVED_COMMIT"
+echo "Commit position $RESOLVED_POSITION"
