@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 source "$(dirname "$0")/common.sh"
 
-if [[ ! -d "$SRC_DIR/.git" ]]; then
+if [[ ! -f "$SRC_DIR/chrome/VERSION" || ! -s "$RESOLVED_REVISION_FILE" ]]; then
   echo "Chromium checkout is missing. Run scripts/bootstrap.sh first." >&2
   exit 1
 fi
@@ -33,7 +33,7 @@ fi
 cp "$APK" "$DIST_DIR/Chromium-ARMv7-Extensions-unsigned.apk"
 
 VERSION="$(chromium_version_from_source)"
-COMMIT="$(git -C "$SRC_DIR" rev-parse HEAD)"
+COMMIT="$(chromium_commit_from_source)"
 POSITION="$(chromium_commit_position_from_source)"
 cat > "$DIST_DIR/build-metadata.json" <<JSON
 {
