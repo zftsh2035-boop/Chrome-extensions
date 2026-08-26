@@ -11,33 +11,37 @@ if [[ ! -d "$DEPOT_TOOLS_DIR/.git" ]]; then
     "$DEPOT_TOOLS_DIR"
 fi
 
-if [[ ! -d "$SRC_DIR/.git" ]]; then
-  mkdir -p "$CHECKOUT_ROOT"
-  (
-    cd "$CHECKOUT_ROOT"
-    fetch --nohooks --nohistory android
-  )
-fi
+mkdir -p "$CHECKOUT_ROOT"
 
-if [[ "$REQUESTED_REF" != "main" && "$REQUESTED_REF" != "refs/heads/main" ]]; then
-  if ! git -C "$SRC_DIR" cat-file -e "$REQUESTED_REF^{commit}" 2>/dev/null; then
-    git -C "$SRC_DIR" fetch --depth=1 origin "$REQUESTED_REF" || {
-      git -C "$SRC_DIR" fetch --depth=128 origin main
-    }
-  fi
-  git -C "$SRC_DIR" checkout --detach "$REQUESTED_REF"
-else
-  git -C "$SRC_DIR" fetch --depth=1 origin main
-  git -C "$SRC_DIR" checkout --detach FETCH_HEAD
-fi
-
-RESOLVED_COMMIT="$(git -C "$SRC_DIR" rev-parse HEAD)"
+# Configure the checkout before the first sync. The upstream "small"
+# configuration omits optional benchmark/test data. WebView CTS archives and
+# Robolectric SDK images are also test-only and together consume many GB; the
+# chrome_public_apk target does not depend on either package.
+cat > "$CHECKOUT_ROOT/.gclient" <<'GCLIENT'
+solutions = [
+  {
+    "name": "src",
+    "url": "https://chromium.googlesource.com/chromium/src.git",
+    "custom_deps": {
+      "src/android_webview/tools/cts_archive/cipd": None,
+      "src/third_party/robolectric/cipd": None,
+    },
+    "custom_vars": {
+      "checkout_configuration": "small",
+    },
+  },
+]
+target_os = ["android"]
+target_os_only = True
+GCLIENT
 
 (
   cd "$CHECKOUT_ROOT"
   gclient sync --nohooks --no-history --jobs="${GCLIENT_JOBS:-4}" \
-    --revision "src@$RESOLVED_COMMIT"
+    --revision "src@$REQUESTED_REF"
 )
+
+RESOLVED_COMMIT="$(git -C "$SRC_DIR" rev-parse HEAD)"
 
 if command -v sudo >/dev/null 2>&1; then
   sudo "$SRC_DIR/build/install-build-deps.sh" --no-prompt --no-syms \
