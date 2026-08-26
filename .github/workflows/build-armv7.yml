@@ -17,11 +17,22 @@ on:
         required: true
         default: true
         type: boolean
+      continuation_attempt:
+        description: Internal build continuation counter
+        required: true
+        default: "0"
+        type: string
+      advance_pin_after_success:
+        description: Internal flag for scheduled build continuations
+        required: true
+        default: false
+        type: boolean
   schedule:
     - cron: "17 3 * * 1"
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: chromium-armv7-release
@@ -40,6 +51,10 @@ jobs:
       GCLIENT_JOBS: "4"
       NINJA_SUMMARIZE_BUILD: "1"
       NINJA_STATUS: "[%f/%t %o/sec %es] "
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: "8G"
+      CCACHE_COMPRESS: "true"
+      CCACHE_COMPILERCHECK: "content"
       ANDROID_KEY_ALIAS: chromium_armv7_extensions
       EXPECTED_CERT_SHA256: 90266730e98c8a40c53694f06c33ab8201968afea039e3ce7347fd7f42ead4f2
 
@@ -104,6 +119,7 @@ jobs:
             --no-arm \
             --no-chromeos-fonts \
             --no-backwards-compatible
+          sudo apt-get install -y --no-install-recommends ccache
           rm -f "$installer"
           sudo apt-get clean
           sudo rm -rf -- /var/lib/apt/lists/* /var/cache/apt/*
@@ -145,14 +161,94 @@ jobs:
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       - name: Fetch Chromium and dependencies
+        id: chromium
         env:
           CHROMIUM_REF: ${{ steps.revision.outputs.ref }}
-        run: bash ./scripts/bootstrap.sh
+        run: |
+          set -Eeuo pipefail
+          bash ./scripts/bootstrap.sh
+          source "$CHROMIUM_WORK_ROOT/resolved-chromium.env"
+          echo "commit=$RESOLVED_CHROMIUM_COMMIT" >> "$GITHUB_OUTPUT"
+
+      - name: Restore compiler checkpoint
+        id: compiler-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: chromium-armv7-ccache-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            chromium-armv7-ccache-v1-
 
       - name: Compile chrome_public_apk
-        run: bash ./scripts/build.sh
+        id: compile
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --zero-stats
+
+          # Stop cleanly before GitHub's hard six-hour job limit. This leaves
+          # enough time to upload the compiler checkpoint used by the next run.
+          set +e
+          timeout --signal=INT --kill-after=120s 17100s bash ./scripts/build.sh
+          status=$?
+          set -e
+
+          ccache --show-stats
+          ccache --cleanup
+
+          if [[ "$status" -eq 0 ]]; then
+            echo "complete=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$status" -eq 124 || "$status" -eq 130 || \
+                  "$status" -eq 137 || "$status" -eq 143 ]]; then
+            echo "Build slice completed; saving a checkpoint for continuation."
+            echo "complete=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Compilation failed with status $status" >&2
+            exit "$status"
+          fi
+
+      - name: Save compiler checkpoint
+        if: always() && steps.compile.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: chromium-armv7-ccache-v1-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Queue continuation build
+        if: steps.compile.outputs.complete != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_ATTEMPT: ${{ inputs.continuation_attempt }}
+          RESOLVED_COMMIT: ${{ steps.chromium.outputs.commit }}
+          INPUT_PUBLISH_RELEASE: ${{ inputs.publish_release }}
+          INPUT_ADVANCE_PIN: ${{ inputs.advance_pin_after_success }}
+        run: |
+          set -Eeuo pipefail
+          attempt="${CURRENT_ATTEMPT:-0}"
+          next_attempt=$((attempt + 1))
+          if (( next_attempt > 5 )); then
+            echo "Build still needs another slice after five continuations." >&2
+            exit 1
+          fi
+
+          publish_release="${INPUT_PUBLISH_RELEASE:-true}"
+          advance_pin="${INPUT_ADVANCE_PIN:-false}"
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            publish_release=true
+            advance_pin=true
+          fi
+
+          gh workflow run build-armv7.yml \
+            --ref "$GITHUB_REF_NAME" \
+            -f chromium_ref="$RESOLVED_COMMIT" \
+            -f use_tip_of_tree=false \
+            -f publish_release="$publish_release" \
+            -f continuation_attempt="$next_attempt" \
+            -f advance_pin_after_success="$advance_pin"
 
       - name: Decode private release key
+        if: steps.compile.outputs.complete == 'true'
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
         run: |
@@ -161,6 +257,7 @@ jobs:
           chmod 600 "$RUNNER_TEMP/release.p12"
 
       - name: Sign and verify APK
+        if: steps.compile.outputs.complete == 'true'
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
@@ -168,6 +265,7 @@ jobs:
           bash ./scripts/verify-apk.sh dist/Chromium-ARMv7-Extensions-signed.apk
 
       - name: Read build metadata
+        if: steps.compile.outputs.complete == 'true'
         id: metadata
         run: |
           set -Eeuo pipefail
@@ -183,6 +281,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Upload durable Actions artifact
+        if: steps.compile.outputs.complete == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: Chromium-${{ steps.metadata.outputs.version }}-armeabi-v7a
@@ -193,7 +292,7 @@ jobs:
           retention-days: 90
 
       - name: Publish GitHub release
-        if: github.event_name == 'schedule' || inputs.publish_release
+        if: steps.compile.outputs.complete == 'true' && (github.event_name == 'schedule' || inputs.publish_release)
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.metadata.outputs.tag }}
@@ -228,7 +327,7 @@ jobs:
           fi
 
       - name: Advance pinned revision after scheduled success
-        if: github.event_name == 'schedule'
+        if: steps.compile.outputs.complete == 'true' && (github.event_name == 'schedule' || inputs.advance_pin_after_success)
         env:
           VERSION: ${{ steps.metadata.outputs.version }}
           COMMIT: ${{ steps.metadata.outputs.commit }}
