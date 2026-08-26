@@ -65,6 +65,7 @@ df -h / "$REPO_ROOT"
 # a few x64 host tools (for example Perfetto's trace processor). Install their
 # hermetic Linux sysroot explicitly before discarding Git metadata and caches.
 python3 "$SRC_DIR/build/linux/sysroot_scripts/install-sysroot.py" --arch=amd64
+python3 "$SRC_DIR/build/linux/sysroot_scripts/install-sysroot.py" --arch=i386
 
 df -h / "$REPO_ROOT"
 
