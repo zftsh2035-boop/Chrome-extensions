@@ -32,6 +32,13 @@ The scheduled weekly run builds current Chromium main. Only after the complete
 build, signing, and verification succeed does it update
 `config/chromium.env` and publish a release.
 
+Standard GitHub-hosted jobs have a six-hour execution limit, while a clean
+Chromium build can take longer. The workflow therefore compiles in bounded
+slices, stores up to 8 GiB of C/C++ results in GitHub's compiler cache, and
+automatically queues a continuation run. Continuations are pinned to the exact
+same Chromium commit; signing and publication happen only after the final
+slice produces the complete APK.
+
 ## Local Linux build
 
 The supported host is Linux x86_64 with at least 16 GiB RAM and roughly
