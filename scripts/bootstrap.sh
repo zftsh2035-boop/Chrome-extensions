@@ -61,6 +61,11 @@ df -h / "$REPO_ROOT"
   gclient runhooks
 )
 
+# target_os_only keeps the checkout compact, but chrome_public_apk still builds
+# a few x64 host tools (for example Perfetto's trace processor). Install their
+# hermetic Linux sysroot explicitly before discarding Git metadata and caches.
+python3 "$SRC_DIR/build/linux/sysroot_scripts/install-sysroot.py" --arch=amd64
+
 df -h / "$REPO_ROOT"
 
 # A shallow gclient checkout still stores a second copy of source content in
