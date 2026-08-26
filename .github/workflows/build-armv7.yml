@@ -79,13 +79,42 @@ jobs:
           fi
           df -h / /mnt
 
+      # install-build-deps writes into /usr and /var on the root filesystem.
+      # Do this while the cleaned runner still has plenty of root space; the
+      # build-volume action below deliberately pools most remaining free space.
+      - name: Check out dependency preflight files
+        uses: actions/checkout@v4
+
+      - name: Install Chromium host build dependencies
+        run: |
+          set -Eeuo pipefail
+          source config/chromium.env
+          installer="$RUNNER_TEMP/install-build-deps.py"
+          curl --fail --location --silent --show-error \
+            --retry 5 --retry-all-errors \
+            "https://raw.githubusercontent.com/chromium/chromium/${CHROMIUM_COMMIT}/build/install-build-deps.py" \
+            --output "$installer"
+          python3 "$installer" \
+            --no-prompt \
+            --no-syms \
+            --lib32 \
+            --no-arm \
+            --no-chromeos-fonts \
+            --no-backwards-compatible
+          rm -f "$installer"
+          sudo apt-get clean
+          sudo rm -rf -- /var/lib/apt/lists/* /var/cache/apt/*
+          df -h / /mnt
+
       # Pin the reviewed v10 commit. It joins the free space on / and /mnt
-      # into one disposable build volume mounted at GITHUB_WORKSPACE.
+      # into one disposable build volume mounted at GITHUB_WORKSPACE. On
+      # runners where /mnt shares the root device, temp-reserve-mb is also the
+      # final root reserve, so keep 1 GiB for Actions bookkeeping.
       - name: Create large workspace volume
         uses: easimon/maximize-build-space@fc881a613ad2a34aca9c9624518214ebc21dfc0c
         with:
           root-reserve-mb: "4096"
-          temp-reserve-mb: "100"
+          temp-reserve-mb: "1024"
           swap-size-mb: "2048"
           overprovision-lvm: "false"
 
