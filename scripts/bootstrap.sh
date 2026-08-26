@@ -42,16 +42,25 @@ GCLIENT
 )
 
 RESOLVED_COMMIT="$(git -C "$SRC_DIR" rev-parse HEAD)"
+df -h / "$REPO_ROOT"
 
-if command -v sudo >/dev/null 2>&1; then
-  sudo "$SRC_DIR/build/install-build-deps.sh" --no-prompt --no-syms \
-    --lib32 --arm --no-chromeos-fonts
-fi
+# The workflow installs host packages before pooling root free space into the
+# build volume. Validate the exact checked-out revision without attempting to
+# write into the deliberately small root reserve.
+"$SRC_DIR/build/install-build-deps.sh" \
+  --quick-check \
+  --no-syms \
+  --lib32 \
+  --no-arm \
+  --no-chromeos-fonts \
+  --no-backwards-compatible
 
 (
   cd "$SRC_DIR"
   gclient runhooks
 )
+
+df -h / "$REPO_ROOT"
 
 echo "Chromium $(chromium_version_from_source)"
 echo "Commit $(git -C "$SRC_DIR" rev-parse HEAD)"
