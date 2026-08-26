@@ -1,6 +1,13 @@
 name: Build ARMv7 Chromium
 
 on:
+  # A dedicated marker lets repository automation start a clean build without
+  # making every source/documentation push consume several runner jobs.
+  push:
+    branches:
+      - main
+    paths:
+      - .github/build-armv7.trigger
   workflow_dispatch:
     inputs:
       chromium_ref:
@@ -292,7 +299,7 @@ jobs:
           retention-days: 90
 
       - name: Publish GitHub release
-        if: steps.compile.outputs.complete == 'true' && (github.event_name == 'schedule' || inputs.publish_release)
+        if: steps.compile.outputs.complete == 'true' && (github.event_name == 'schedule' || github.event_name == 'push' || inputs.publish_release)
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.metadata.outputs.tag }}
