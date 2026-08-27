@@ -53,10 +53,10 @@ jobs:
     timeout-minutes: 360
     env:
       CHROMIUM_WORK_ROOT: ${{ github.workspace }}/.work
-      # Public Linux runners provide 4 CPU / 16 GB. Six Ninja workers keep the
-      # cores busy without risking the memory spikes seen with fully unbounded
-      # Chromium builds.
-      NINJA_JOBS: "6"
+      # Public Linux runners provide 4 CPU / 16 GB. Keep one Clang worker per
+      # core: six workers can exhaust RAM when several large Blink translation
+      # units miss the cache at the same time and kill the hosted runner.
+      NINJA_JOBS: "4"
       GCLIENT_JOBS: "4"
       NINJA_SUMMARIZE_BUILD: "1"
       NINJA_STATUS: "[%f/%t %o/sec %es] "
@@ -202,10 +202,11 @@ jobs:
           ccache --max-size "$CCACHE_MAXSIZE"
           ccache --zero-stats
 
-          # Stop cleanly before GitHub's hard six-hour job limit. This leaves
-          # enough time to upload the compiler checkpoint used by the next run.
+          # Save progress every three hours. Shorter slices lose much less work
+          # if a hosted runner disappears, while a warmed cache still leaves
+          # enough time for the final link and APK packaging in one slice.
           set +e
-          timeout --signal=INT --kill-after=120s 17100s bash ./scripts/build.sh
+          timeout --signal=INT --kill-after=120s 10800s bash ./scripts/build.sh
           status=$?
           set -e
 
@@ -242,8 +243,8 @@ jobs:
           set -Eeuo pipefail
           attempt="${CURRENT_ATTEMPT:-0}"
           next_attempt=$((attempt + 1))
-          if (( next_attempt > 5 )); then
-            echo "Build still needs another slice after five continuations." >&2
+          if (( next_attempt > 12 )); then
+            echo "Build still needs another slice after twelve continuations." >&2
             exit 1
           fi
 
