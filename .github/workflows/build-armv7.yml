@@ -43,9 +43,9 @@ permissions:
 
 concurrency:
   group: chromium-armv7-release
-  # A configuration fix must replace an obsolete build immediately instead of
-  # waiting behind a five-hour slice that can no longer produce a useful cache.
-  cancel-in-progress: true
+  # A continuation is queued before the current job finishes its cleanup.
+  # Never let that new run cancel the job that just saved its checkpoint.
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -68,7 +68,10 @@ jobs:
       # as uncacheable unless depend mode and module sloppiness are enabled.
       # Every continuation builds the exact same pinned source and toolchain.
       CCACHE_DEPEND: "true"
-      CCACHE_SLOPPINESS: "time_macros,modules"
+      # gclient and GN recreate generated headers in every fresh runner. Their
+      # contents are pinned, but their ctime/mtime are not; ignoring only those
+      # timestamps lets direct-mode entries survive across continuation jobs.
+      CCACHE_SLOPPINESS: "time_macros,modules,include_file_ctime,include_file_mtime"
       CCACHE_BASEDIR: ${{ github.workspace }}/.work/chromium/src
       ANDROID_KEY_ALIAS: chromium_armv7_extensions
       EXPECTED_CERT_SHA256: 90266730e98c8a40c53694f06c33ab8201968afea039e3ce7347fd7f42ead4f2
@@ -202,11 +205,11 @@ jobs:
           ccache --max-size "$CCACHE_MAXSIZE"
           ccache --zero-stats
 
-          # Save progress every three hours. Shorter slices lose much less work
-          # if a hosted runner disappears, while a warmed cache still leaves
-          # enough time for the final link and APK packaging in one slice.
+          # Leave more than an hour of the six-hour job limit for checkout,
+          # cache transfer, final signing, and publication. With the warmed
+          # cache this long slice can finish compilation and packaging at once.
           set +e
-          timeout --signal=INT --kill-after=120s 10800s bash ./scripts/build.sh
+          timeout --signal=INT --kill-after=120s 17100s bash ./scripts/build.sh
           status=$?
           set -e
 
