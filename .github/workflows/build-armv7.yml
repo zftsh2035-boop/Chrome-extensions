@@ -43,9 +43,9 @@ permissions:
 
 concurrency:
   group: chromium-armv7-release
-  # One replacement run is being started to apply the corrected cache
-  # immediately; this is switched back to false as soon as that run exists.
-  cancel-in-progress: true
+  # A continuation is queued before the current job finishes its cleanup.
+  # Never let that new run cancel the job that just saved its checkpoint.
+  cancel-in-progress: false
 
 jobs:
   build:
