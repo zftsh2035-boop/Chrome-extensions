@@ -227,12 +227,47 @@ jobs:
             exit "$status"
           fi
 
+      # The Chromium checkout and out/ directory nearly fill the temporary
+      # workspace. actions/cache creates a second compressed copy while saving,
+      # so remove disposable sources after an incomplete slice and leave only
+      # ccache before the archive is created.
+      - name: Free workspace for checkpoint archive
+        if: steps.compile.outputs.complete != 'true'
+        run: |
+          set -Eeuo pipefail
+          echo "Freeing the disposable Chromium checkout before archiving ccache."
+          sudo rm -rf -- "$CHROMIUM_WORK_ROOT"
+          sync
+          df -h "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+
       - name: Save compiler checkpoint
-        if: always() && steps.compile.outcome == 'success'
+        if: steps.compile.outcome == 'success' && steps.compile.outputs.complete != 'true'
         uses: actions/cache/save@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: chromium-armv7-ccache-v2-${{ github.run_id }}-${{ github.run_attempt }}
+
+      # actions/cache reports archive failures as warnings and can leave the
+      # step green. Refuse to queue another slice unless GitHub can see the
+      # exact cache key that was just written.
+      - name: Verify compiler checkpoint
+        if: steps.compile.outputs.complete != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CACHE_KEY: chromium-armv7-ccache-v2-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          for retry in {1..6}; do
+            count="$(gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/caches" \
+              -f key="$CACHE_KEY" --jq '.total_count')"
+            if [[ "$count" -gt 0 ]]; then
+              echo "Compiler checkpoint verified: $CACHE_KEY"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Compiler checkpoint was not persisted: $CACHE_KEY" >&2
+          exit 1
 
       - name: Queue continuation build
         if: steps.compile.outputs.complete != 'true'
